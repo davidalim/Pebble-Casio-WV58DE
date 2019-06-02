@@ -585,7 +585,8 @@ void window_load(Window *window)
 	layer_add_child(window_layer, text_layer_get_layer(wd_layer));
         
 	//Init bluetooth radio
-	radio_layer = bitmap_layer_create(GRect(106, 130, 31, 33));
+	//106, 130, 31, 33
+	radio_layer = bitmap_layer_create(GRect(4, 45, 16, 17));
 	bitmap_layer_set_background_color(radio_layer, GColorClear);
 	bitmap_layer_set_bitmap(radio_layer, radio);
 	bitmap_layer_set_compositing_mode(radio_layer, GCompOpSet);
