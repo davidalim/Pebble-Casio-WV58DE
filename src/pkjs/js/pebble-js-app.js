@@ -50,7 +50,7 @@ Pebble.addEventListener("ready", function() {
 		lang = "en";
 
 	console.log("JavaScript app ready and running! Pebble lang: " + p_lang + ", using for Weather: " + lang);
-	sendMessageToPebble({"JS_READY": 1});		
+	sendMessageToPebble({"JS_READY": 1});
 });
 //-----------------------------------------------------------------------------------------------------------------------
 function sendMessageToPebble(payload) {
@@ -76,6 +76,7 @@ function locationSuccess(pos) {
 	posLon = (pos.coords.longitude).toFixed(3);
 	
 	updateWeather();
+    updateSunsetTimes();
 }
 //-----------------------------------------------------------------------------------------------------------------------
 function locationError(err) {
@@ -92,9 +93,11 @@ Pebble.addEventListener('appmessage', function(e) {
 			navigator.geolocation.getCurrentPosition(locationSuccess, locationError, locationOptions);
 		else
 			updateWeather();
+            updateSunsetTimes();
 	}
 });
 //-----------------------------------------------------------------------------------------------------------------------
+// TODO: Get and store next few day's times to display when offline
 function updateWeather() {
 	console.log("Updating weather");
 	var req = new XMLHttpRequest();
@@ -128,6 +131,36 @@ function updateWeather() {
 		}
 	};
 	req.send(null);
+}
+//-----------------------------------------------------------------------------------------------------------------------
+// TODO: Get and store next few day's times to display when offline
+function updateSunsetTimes() {
+    console.log("Updating sunrise/sunset times");
+    var req = new XMLHttpRequest();
+    var URL = "https://api.sunrise-sunset.org/json?";
+    
+    if (CityID !== 0)
+        URL += "id="+CityID.toString();
+    else if (posLat != "0" && posLon != "0")
+        URL += "lat=" + posLat + "&lng=" + posLon;
+    else
+        return; //Error, no position data
+    
+    URL += "&date=today&formatted=0";
+    console.log("UpdateURL: " + URL);
+    req.open("GET", URL, true);
+    req.onload = function(e) {
+        if (req.readyState == 4) {
+            if (req.status == 200) {
+                var response = JSON.parse(req.responseText);
+                var sunrise = response.results.sunrise; // convert to date
+                var sunset = response.results.sunrise; // convert to date
+                var day_length = response.results.day_length; // 
+                console.log("Got sunset data for location: lat=" + posLat + ", lon: " + posLon + ", Sunrise Time:" + sunrise + ", Sunset Time:" + sunset+", Solar Noon Time:" + solar_noon + ", Day length:" + day_length);
+            }
+        }
+    };
+    req.send(null);
 }
 //-----------------------------------------------------------------------------------------------------------------------
 Pebble.addEventListener("showConfiguration", function() {
