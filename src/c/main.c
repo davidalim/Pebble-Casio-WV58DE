@@ -1,6 +1,7 @@
 #include <pebble.h>
 #include <pebble-effect-layer/pebble-effect-layer.h>
 
+static const int W_UPDATE_SEC = 60 * 15; // Update weather every 15 minutes
 
 enum ConfigKeys {
 	JS_READY=0,
@@ -329,15 +330,17 @@ static void timerCallbackWeather(void *data)
 	if (CfgData.w_UpdateRetry && !layer_get_hidden(bitmap_layer_get_layer(radio_layer)))
 	{
 		update_weather();
-		timer_weather = app_timer_register(30000, timerCallbackWeather, NULL); //Try again in 30 sec
+		timer_weather = app_timer_register(30 * 1000, timerCallbackWeather, NULL); //Try again in 30 sec
 	}
 	else
 	{
 		CfgData.w_UpdateRetry = true;
-		timer_weather = app_timer_register(60000*60, timerCallbackWeather, NULL); //1h static update
+		timer_weather = app_timer_register(W_UPDATE_SEC * 1000, timerCallbackWeather, NULL);
 	}
 }
 //-----------------------------------------------------------------------------------------------------------------------
+// Stores new configuration data (including weather updates).
+// Then recreates the background layer, causing the background handler to get called
 static void update_configuration(void)
 {
     if (persist_exists(C_INV))
@@ -424,10 +427,11 @@ static void update_configuration(void)
 	//Update Weather
 	if (CfgData.w_UpdateRetry && CfgData.weather)
 	{
-		if (CfgData.w_time == 0 || (tmAkt - CfgData.w_time) > 60*60)
+		int w_timeSinceLastUpdateSec = (tmAkt - CfgData.w_time);
+		if (CfgData.w_time == 0 || w_timeSinceLastUpdateSec > W_UPDATE_SEC)
 			timer_weather = app_timer_register(100, timerCallbackWeather, NULL);
 		else
-			timer_weather = app_timer_register((60*60-(tmAkt-CfgData.w_time))*1000, timerCallbackWeather, NULL);
+			timer_weather = app_timer_register((W_UPDATE_SEC - w_timeSinceLastUpdateSec)*1000, timerCallbackWeather, NULL);
 	}
 }
 //-----------------------------------------------------------------------------------------------------------------------
