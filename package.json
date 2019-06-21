@@ -24,6 +24,8 @@
             "units": 5,
             "vibr": 2,
             "vibr_bt": 7,
+            "sun_rise_time": 94,
+            "sun_set_time": 95,
             "w_cond": 93,
             "w_icon": 92,
             "w_temp": 91,
@@ -42,6 +44,12 @@
                 {
                     "file": "images/Radio.png",
                     "name": "IMAGE_RADIO",
+                    "targetPlatforms": null,
+                    "type": "bitmap"
+                },
+                {
+                    "file": "images/Sun.png",
+                    "name": "IMAGE_SUN",
                     "targetPlatforms": null,
                     "type": "bitmap"
                 },
@@ -82,6 +90,14 @@
                     "compatibility": "2.7",
                     "file": "fonts/DIGITAL_BOLD.TTF",
                     "name": "FONT_DIGITAL_25",
+                    "trackingAdjust": -1,
+                    "type": "font"
+                },
+                {
+                    "characterRegex": "[-/0-9.]",
+                    "compatibility": "2.7",
+                    "file": "fonts/DIGITAL_BOLD.TTF",
+                    "name": "FONT_DIGITAL_15",
                     "trackingAdjust": -1,
                     "type": "font"
                 },

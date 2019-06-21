@@ -1,7 +1,7 @@
 #include <pebble.h>
 #include <pebble-effect-layer/pebble-effect-layer.h>
 
-static const int W_UPDATE_SEC = 60 * 15; // Update weather every 15 minutes
+static const int W_UPDATE_SEC = 15; // Update weather every 15 minutes
 
 enum ConfigKeys {
 	JS_READY=0,
@@ -19,7 +19,9 @@ enum ConfigKeys {
 	W_TIME=90,
 	W_TEMP=91,
 	W_ICON=92,
-	W_COND=93
+	W_COND=93,
+	SUN_RISE_TIME=94,
+	SUN_SET_TIME=95
 };
 
 typedef struct {
@@ -31,11 +33,13 @@ typedef struct {
 	bool weather, cond;
 	bool isunit;
 	uint32_t cityid;
-	uint32_t w_time;
+	uint32_t w_time; // last weather update time. 0 = not upated
 	int16_t w_temp;
 	char w_icon[2], w_cond[50];
 	bool w_UpdateRetry;
 	bool s_Charging;
+	char sun_rise_time[50]; // time of sunrise to show
+	char sun_set_time[50]; // time of sunset to show
 } __attribute__((__packed__)) CfgDta_t;
 
 static CfgDta_t CfgData = {
@@ -58,20 +62,22 @@ static CfgDta_t CfgData = {
 	.w_cond = "",
 	.w_UpdateRetry = false,
 	.s_Charging = false,
+	.sun_rise_time = "",
+	.sun_set_time = "",
 };
 
 Window *window, *sec_window;
 Layer *background_layer; 
 TextLayer *ddmm_layer, *yyyy_layer, *hhmm_layer, *ss_layer, *wd_layer;
-BitmapLayer *radio_layer, *battery_layer;
+BitmapLayer *radio_layer, *battery_layer, *sunrise_layer;
 InverterLayer *inv_layer, *sec_inv_layer;
 
-static GBitmap *background, *radio, *batteryAll, *batteryAkt;
-static GFont digitS, digitM, digitL, WeatherF, arial9;
+static GBitmap *background, *radio, *batteryAll, *batteryAkt, *sun;
+static GFont digitXS, digitS, digitM, digitL, WeatherF, arial9;
 
 char ddmmBuffer[] = "00-00", yyyyBuffer[] = "0000", hhmmBuffer[] = "00:00", ssBuffer[] = "00", wdBuffer[] = "XXXX";
 static uint8_t aktBatt, aktBattAnim;
-static AppTimer *timer_weather, *timer_batt;
+static AppTimer *timer_weather, *timer_sun, *timer_batt;
 
 //-----------------------------------------------------------------------------------------------------------------------
 char *upcase(char *str) {
@@ -100,7 +106,7 @@ static void update_all()
 //-----------------------------------------------------------------------------------------------------------------------
 static void secwnd_update_proc(Layer *layer, GContext *ctx) 
 {
-	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Second Windows Layer Update");
+	//app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Second Windows Layer Update");
 	graphics_context_set_fill_color(ctx, GColorWhite);
 	graphics_fill_rect(ctx, GRect(114, 66, 25, 18), 0, GCornerNone);
 }
@@ -218,6 +224,20 @@ static void background_layer_update_callback(Layer *layer, GContext* ctx)
 			graphics_draw_text(ctx, "h", WeatherF, GRect(rc.origin.x+rc.size.w/2-sz.w/2, rc.origin.y+rc.size.h/2-sz.h/2, sz.w, sz.h), GTextOverflowModeFill, GTextAlignmentCenter, NULL);
 		}
 	}
+
+
+	//Sunrise & Sunset
+	//108, 141, 15, 15
+	//struct tm epoch_time;
+	//memcpy(&epoch_time, localtime(&CfgData.sun_set_time), sizeof (struct tm));
+	//strftime(hhmmBuffer, sizeof(hhmmBuffer), "%H:%M", epoch_time);
+
+	//char sSun[] = "-999";
+	//snprintf(sSun, sizeof(sSun), "%d", (int16_t)(CfgData.sun_set_time)); 
+
+			//strftime(hhmmBuffer, sizeof(hhmmBuffer), "%I:%M", tick_time);
+	//graphics_draw_text(ctx, sSun, digitXS, GRect(70, 150, 50, 32), GTextOverflowModeFill, GTextAlignmentRight, NULL);
+			
 	
 	//AM/PM
 	if(!clock_is_24h_style())
@@ -324,10 +344,15 @@ static bool update_weather()
 	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Send message with data: c_ckey=%d", (int)CfgData.cityid);
 	return true;
 }
+
+static bool isBluetoothConnected()
+{
+	return !layer_get_hidden(bitmap_layer_get_layer(radio_layer));
+}
 //-----------------------------------------------------------------------------------------------------------------------
 static void timerCallbackWeather(void *data) 
 {
-	if (CfgData.w_UpdateRetry && !layer_get_hidden(bitmap_layer_get_layer(radio_layer)))
+	if (CfgData.w_UpdateRetry && isBluetoothConnected())
 	{
 		update_weather();
 		timer_weather = app_timer_register(30 * 1000, timerCallbackWeather, NULL); //Try again in 30 sec
@@ -338,6 +363,18 @@ static void timerCallbackWeather(void *data)
 		timer_weather = app_timer_register(W_UPDATE_SEC * 1000, timerCallbackWeather, NULL);
 	}
 }
+
+/*
+You want..
+-Weather update every 15 minutes
+-Sun position update every 15 or so minutes
+-Sunset times for the day. But you don't nessecarily need to update this every 15 minutes
+
+=> We can handle caching and such in phone app. 
+
+
+*/
+
 //-----------------------------------------------------------------------------------------------------------------------
 // Stores new configuration data (including weather updates).
 // Then recreates the background layer, causing the background handler to get called
@@ -388,10 +425,17 @@ static void update_configuration(void)
 	if (persist_exists(W_COND))
 		persist_read_string(W_COND, CfgData.w_cond, sizeof(CfgData.w_cond));
 
+	if (persist_exists(SUN_RISE_TIME))
+		persist_read_string(SUN_RISE_TIME, CfgData.sun_rise_time, sizeof(CfgData.sun_rise_time));
+
+	if (persist_exists(SUN_SET_TIME))
+		persist_read_string(SUN_SET_TIME, CfgData.sun_set_time, sizeof(CfgData.sun_set_time));
+
 	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Curr Conf #1: inv:%d, showsec:%d, battdgt:%d, showbatt:%d, vibr:%d, datefmt:%d, weather:%d", CfgData.inv, CfgData.showsec, CfgData.battdgt, CfgData.showbatt, CfgData.vibr, CfgData.datefmt, CfgData.weather);
 	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Curr Conf #2: isunit:%d, cityid:%d", CfgData.isunit, (int)CfgData.cityid);
 	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Weather Data: w_time:%d, w_temp:%d, w_icon:%s, w_cond:%s", (int)CfgData.w_time, CfgData.w_temp, CfgData.w_icon, CfgData.w_cond);
-	
+	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Sunset Data: sun_rise_time:%s, sun_set_time:%s", CfgData.sun_rise_time, CfgData.sun_set_time);
+
 	Layer *window_layer = window_get_root_layer(window);
 
 	//Inverter Layer
@@ -433,6 +477,7 @@ static void update_configuration(void)
 		else
 			timer_weather = app_timer_register((W_UPDATE_SEC - w_timeSinceLastUpdateSec)*1000, timerCallbackWeather, NULL);
 	}
+
 }
 //-----------------------------------------------------------------------------------------------------------------------
 void in_received_handler(DictionaryIterator *received, void *ctx)
@@ -444,6 +489,7 @@ void in_received_handler(DictionaryIterator *received, void *ctx)
     while (akt_tuple)
     {
 		int intVal = atoi(akt_tuple->value->cstring);
+    	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Looking at cstring %s", akt_tuple->value->cstring);
         app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "KEY %d=%d/%s/%d", (int16_t)akt_tuple->key, akt_tuple->value->int16 ,akt_tuple->value->cstring, intVal);
 
 		switch (akt_tuple->key)	{
@@ -507,11 +553,17 @@ void in_received_handler(DictionaryIterator *received, void *ctx)
 		case W_COND:
 			persist_write_string(W_COND, akt_tuple->value->cstring);
 			break;
+		case SUN_RISE_TIME:
+			persist_write_string(SUN_RISE_TIME, akt_tuple->value->cstring);
+			break;
+		case SUN_SET_TIME:
+			persist_write_string(SUN_SET_TIME, akt_tuple->value->cstring);
+			break;
 		}
 		
 		akt_tuple = dict_read_next(received);
 	}
-	
+
     update_configuration();
 }
 //-----------------------------------------------------------------------------------------------------------------------
@@ -529,7 +581,10 @@ void window_load(Window *window)
 	background = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_BACKGROUND);
 	batteryAll = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_BATTERIES);
 	radio = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_RADIO);
+	sun = gbitmap_create_with_resource(RESOURCE_ID_IMAGE_SUN);
 	
+
+	digitXS = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_DIGITAL_15));
 	digitS = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_DIGITAL_25));
 	digitM = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_DIGITAL_35));
 	digitL = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_DIGITAL_55));
@@ -589,12 +644,19 @@ void window_load(Window *window)
 	layer_add_child(window_layer, text_layer_get_layer(wd_layer));
         
 	//Init bluetooth radio
-	//106, 130, 31, 33
 	radio_layer = bitmap_layer_create(GRect(4, 45, 16, 17));
 	bitmap_layer_set_background_color(radio_layer, GColorClear);
 	bitmap_layer_set_bitmap(radio_layer, radio);
 	bitmap_layer_set_compositing_mode(radio_layer, GCompOpSet);
 	layer_add_child(window_layer, bitmap_layer_get_layer(radio_layer));
+
+
+	sunrise_layer = bitmap_layer_create(GRect(108, 141, 15, 15));
+	bitmap_layer_set_background_color(sunrise_layer, GColorClear);
+	bitmap_layer_set_bitmap(sunrise_layer, sun);
+	bitmap_layer_set_compositing_mode(sunrise_layer, GCompOpSet);
+	layer_add_child(window_layer, bitmap_layer_get_layer(sunrise_layer));
+	
 	
 	//Init inverter_layer
 	inv_layer = inverter_layer_create(GRect(0, 0, 144, 168));
@@ -614,6 +676,7 @@ void window_unload(Window *window)
 	text_layer_destroy(wd_layer);
 	
 	//Unload Fonts
+	fonts_unload_custom_font(digitXS);
 	fonts_unload_custom_font(digitS);
 	fonts_unload_custom_font(digitM);
 	fonts_unload_custom_font(digitL);
@@ -625,16 +688,25 @@ void window_unload(Window *window)
 	gbitmap_destroy(batteryAll);
 	gbitmap_destroy(radio);
 	gbitmap_destroy(background);
+	gbitmap_destroy(sun);
 
 	//Destroy BitmapLayers
 	bitmap_layer_destroy(battery_layer);
 	bitmap_layer_destroy(radio_layer);
+	bitmap_layer_destroy(sunrise_layer);
 	layer_destroy(background_layer);
 	
 	//Destroy Inverter Layer
 	inverter_layer_destroy(inv_layer);
 	inverter_layer_destroy(sec_inv_layer);
 }
+//-----------------------------------------------------------------------------------------------------------------------
+static void multi_select_click_handler(ClickRecognizerRef recognizer,
+                                                              void *context) {
+	layer_set_hidden(bitmap_layer_get_layer(sunrise_layer), true);
+	update_all();
+}
+
 //-----------------------------------------------------------------------------------------------------------------------
 void handle_init(void) 
 {
@@ -677,6 +749,7 @@ void handle_init(void)
 void handle_deinit(void) 
 {
 	app_timer_cancel(timer_weather);
+	app_timer_cancel(timer_sun);
 	app_timer_cancel(timer_batt);
 	app_message_deregister_callbacks();
 	tick_timer_service_unsubscribe();

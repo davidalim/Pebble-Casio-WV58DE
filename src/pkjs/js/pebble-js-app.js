@@ -1,5 +1,6 @@
 var initialised = false;
 var CityID = 0, posLat = "0", posLon = "0", lang = "en";
+
 var weatherIcon = {
     "01d" : 'I',	//clear sky (day)
     "02d" : '"',	//few clouds (day)
@@ -52,15 +53,16 @@ Pebble.addEventListener("ready", function() {
 	console.log("JavaScript app ready and running! Pebble lang: " + p_lang + ", using for Weather: " + lang);
 	sendMessageToPebble({"JS_READY": 1});
 });
+
 //-----------------------------------------------------------------------------------------------------------------------
 function sendMessageToPebble(payload) {
-	Pebble.sendAppMessage(payload, 
-		function(e) {
-			console.log('Successfully delivered message (' + e.payload + ') with transactionId='+ e.data.transactionId);
-		},
-		function(e) {
-			console.log('Unable to deliver message with transactionId=' + e.data.transactionId + ' Error is: ' + e.error.message);
-		});
+    Pebble.sendAppMessage(payload,
+        function(e) {
+            console.log('Successfully delivered message (' + e.payload + ') with transactionId='+ e.data.transactionId);
+        },
+        function(e) {
+            console.log('Unable to deliver message with transactionId=' + e.data.transactionId + ' Error is: ' + e.error.message);
+        });
 }
 //-----------------------------------------------------------------------------------------------------------------------
 //-- Get current location: http://forums.getpebble.com/discussion/21755/pebble-js-location-to-url
@@ -76,7 +78,6 @@ function locationSuccess(pos) {
 	posLon = (pos.coords.longitude).toFixed(3);
 	
 	updateWeather();
-    updateSunsetTimes();
 }
 //-----------------------------------------------------------------------------------------------------------------------
 function locationError(err) {
@@ -93,14 +94,13 @@ Pebble.addEventListener('appmessage', function(e) {
 			navigator.geolocation.getCurrentPosition(locationSuccess, locationError, locationOptions);
 		else
 			updateWeather();
-            updateSunsetTimes();
 	}
 });
+
 //-----------------------------------------------------------------------------------------------------------------------
 // TODO: Get and store next few day's times to display when offline
 function updateWeather() {
 	console.log("Updating weather");
-	var req = new XMLHttpRequest();
 	var URL = "http://api.openweathermap.org/data/2.5/weather?APPID=9a4eed6c813f6d55d0699c148f7b575a&";
 	
 	if (CityID !== 0)
@@ -112,31 +112,33 @@ function updateWeather() {
 	
 	URL += "&units=metric&lang=" + lang + "&type=accurate";
 	console.log("UpdateURL: " + URL);
-	req.open("GET", URL, true);
-	req.onload = function(e) {
-		if (req.readyState == 4) {
-			if (req.status == 200) {
-				var response = JSON.parse(req.responseText);
-				var temp = Math.round(response.main.temp);//-273.15
-				var icon = response.weather[0].icon;
-				var cond = response.weather[0].description;
-				var name = response.name;
-				console.log("Got Weather Data for City: " + name + ", Temp: " + temp + ", Icon:" + icon + "/" + weatherIcon[icon]+", Cond:"+cond);
-				sendMessageToPebble({
-					"w_temp": temp,
-					"w_icon": weatherIcon[icon],
-					"w_cond": cond
-				});
-			}
-		}
-	};
-	req.send(null);
+
+    var req = new XMLHttpRequest();
+    req.open("GET", URL, true);
+    req.onload = function(e) {
+        if (req.readyState == 4 && req.status == 200) {
+            var response = JSON.parse(req.responseText);
+            var temp = Math.round(response.main.temp);//-273.15
+            var icon = response.weather[0].icon;
+            var cond = response.weather[0].description;
+            var name = response.name;
+            console.log("Got Weather Data for City: " + name + ", Temp: " + temp + ", Icon:" + icon + "/" + weatherIcon[icon]+", Cond:"+cond);
+            var weatherPayload = {
+                "w_temp": temp,
+                "w_icon": weatherIcon[icon],
+                "w_cond": cond
+            };
+            // Chaining like this is ugly, but looks like the only option without pebble's support of promises
+            updateSunsetTimes(weatherPayload);
+        }
+    };
+    req.send(null);
+
 }
 //-----------------------------------------------------------------------------------------------------------------------
 // TODO: Get and store next few day's times to display when offline
-function updateSunsetTimes() {
+function updateSunsetTimes(weatherPayload) {
     console.log("Updating sunrise/sunset times");
-    var req = new XMLHttpRequest();
     var URL = "https://api.sunrise-sunset.org/json?";
     
     if (CityID !== 0)
@@ -148,20 +150,30 @@ function updateSunsetTimes() {
     
     URL += "&date=today&formatted=0";
     console.log("UpdateURL: " + URL);
+
+    var req = new XMLHttpRequest();
     req.open("GET", URL, true);
     req.onload = function(e) {
-        if (req.readyState == 4) {
-            if (req.status == 200) {
-                var response = JSON.parse(req.responseText);
-                var sunrise = response.results.sunrise; // convert to date
-                var sunset = response.results.sunrise; // convert to date
-                var day_length = response.results.day_length; // 
-                console.log("Got sunset data for location: lat=" + posLat + ", lon: " + posLon + ", Sunrise Time:" + sunrise + ", Sunset Time:" + sunset+", Solar Noon Time:" + solar_noon + ", Day length:" + day_length);
+        if (req.readyState == 4 && req.status == 200) {
+            var response = JSON.parse(req.responseText);
+            var sunrise = response.results.sunrise; // convert to date
+            var sunset = response.results.sunset; // convert to date
+            var day_length = response.results.day_length; //
+            console.log("Got sunset data for location: lat=" + posLat + ", lon: " + posLon + ", Sunrise Time:" + sunrise + ", Sunset Time:" + sunset + ", Day length:" + day_length);
+            var sunsetPayload = {
+                "sun_rise_time": sunrise,
+                "sun_set_time": sunset
+            };
+
+            for (key in sunsetPayload){
+                weatherPayload[key] = sunsetPayload[key];
             }
+            sendMessageToPebble(weatherPayload);
         }
     };
     req.send(null);
 }
+
 //-----------------------------------------------------------------------------------------------------------------------
 Pebble.addEventListener("showConfiguration", function() {
     var options = JSON.parse(localStorage.getItem('cas_wv_28de_opt'));
