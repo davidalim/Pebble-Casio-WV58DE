@@ -1,7 +1,7 @@
 #include <pebble.h>
 #include <pebble-effect-layer/pebble-effect-layer.h>
 
-static const int W_UPDATE_SEC = 15; // Update weather every 15 minutes
+static const int W_UPDATE_SEC = 60 * 15; // Update weather every 15 minutes
 
 enum ConfigKeys {
 	JS_READY=0,
@@ -38,8 +38,8 @@ typedef struct {
 	char w_icon[2], w_cond[50];
 	bool w_UpdateRetry;
 	bool s_Charging;
-	char sun_rise_time[50]; // time of sunrise to show
-	char sun_set_time[50]; // time of sunset to show
+	uint32_t sun_rise_time; // time of sunrise to show
+	uint32_t sun_set_time; // time of sunset to show
 } __attribute__((__packed__)) CfgDta_t;
 
 static CfgDta_t CfgData = {
@@ -62,20 +62,20 @@ static CfgDta_t CfgData = {
 	.w_cond = "",
 	.w_UpdateRetry = false,
 	.s_Charging = false,
-	.sun_rise_time = "",
-	.sun_set_time = "",
+	.sun_rise_time = 0,
+	.sun_set_time = 0,
 };
 
 Window *window, *sec_window;
 Layer *background_layer; 
-TextLayer *ddmm_layer, *yyyy_layer, *hhmm_layer, *ss_layer, *wd_layer;
+TextLayer *ddmm_layer, *yyyy_layer, *hhmm_layer, *ss_layer, *wd_layer, *sun_top_layer, *sun_bottom_layer;
 BitmapLayer *radio_layer, *battery_layer, *sunrise_layer;
 InverterLayer *inv_layer, *sec_inv_layer;
 
 static GBitmap *background, *radio, *batteryAll, *batteryAkt, *sun;
-static GFont digitXS, digitS, digitM, digitL, WeatherF, arial9;
+static GFont digitXS, digitS, digitM, digitL, WeatherF, arial9, arial20;
 
-char ddmmBuffer[] = "00-00", yyyyBuffer[] = "0000", hhmmBuffer[] = "00:00", ssBuffer[] = "00", wdBuffer[] = "XXXX";
+char ddmmBuffer[] = "00-00", yyyyBuffer[] = "0000", hhmmBuffer[] = "00:00", ssBuffer[] = "00", wdBuffer[] = "XXXX", hhmmSunRBuffer[] = "▲00:00", hhmmSunSBuffer[] = "▼00:00";
 static uint8_t aktBatt, aktBattAnim;
 static AppTimer *timer_weather, *timer_sun, *timer_batt;
 
@@ -237,7 +237,26 @@ static void background_layer_update_callback(Layer *layer, GContext* ctx)
 
 			//strftime(hhmmBuffer, sizeof(hhmmBuffer), "%I:%M", tick_time);
 	//graphics_draw_text(ctx, sSun, digitXS, GRect(70, 150, 50, 32), GTextOverflowModeFill, GTextAlignmentRight, NULL);
-			
+
+ 	//memset(&ctime, 0, sizeof(struct tm));
+  	//strptime("2019-06-21T12:10:43+00:00", "%FT%T", &ctime);
+  	time_t tmAkt;
+  	struct tm *ctime;
+
+  	tmAkt = (time_t)CfgData.sun_set_time;
+  	ctime = localtime(&tmAkt);
+  	strftime(hhmmSunSBuffer, sizeof(hhmmSunSBuffer), "▼%I:%M", ctime);
+
+	tmAkt = (time_t)CfgData.sun_rise_time;
+  	ctime = localtime(&tmAkt);
+  	strftime(hhmmSunRBuffer, sizeof(hhmmSunRBuffer), "▲%I:%M", ctime);
+
+  	// TODO swap these depending on what comes next. i.e. if sun is up, the sunset time should be on top
+	text_layer_set_text(sun_top_layer, hhmmSunSBuffer);
+	text_layer_set_text(sun_bottom_layer, hhmmSunRBuffer);
+
+  	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Sunrise time local: %s, sunset time local: %s", hhmmSunRBuffer, hhmmSunSBuffer);
+
 	
 	//AM/PM
 	if(!clock_is_24h_style())
@@ -426,15 +445,15 @@ static void update_configuration(void)
 		persist_read_string(W_COND, CfgData.w_cond, sizeof(CfgData.w_cond));
 
 	if (persist_exists(SUN_RISE_TIME))
-		persist_read_string(SUN_RISE_TIME, CfgData.sun_rise_time, sizeof(CfgData.sun_rise_time));
+		CfgData.sun_rise_time = persist_read_int(SUN_RISE_TIME);
 
 	if (persist_exists(SUN_SET_TIME))
-		persist_read_string(SUN_SET_TIME, CfgData.sun_set_time, sizeof(CfgData.sun_set_time));
+		CfgData.sun_set_time = persist_read_int(SUN_SET_TIME);
 
 	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Curr Conf #1: inv:%d, showsec:%d, battdgt:%d, showbatt:%d, vibr:%d, datefmt:%d, weather:%d", CfgData.inv, CfgData.showsec, CfgData.battdgt, CfgData.showbatt, CfgData.vibr, CfgData.datefmt, CfgData.weather);
 	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Curr Conf #2: isunit:%d, cityid:%d", CfgData.isunit, (int)CfgData.cityid);
 	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Weather Data: w_time:%d, w_temp:%d, w_icon:%s, w_cond:%s", (int)CfgData.w_time, CfgData.w_temp, CfgData.w_icon, CfgData.w_cond);
-	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Sunset Data: sun_rise_time:%s, sun_set_time:%s", CfgData.sun_rise_time, CfgData.sun_set_time);
+	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Sunset Data: sun_rise_time:%d, sun_set_time:%d", (int)CfgData.sun_rise_time, (int)CfgData.sun_set_time);
 
 	Layer *window_layer = window_get_root_layer(window);
 
@@ -490,7 +509,7 @@ void in_received_handler(DictionaryIterator *received, void *ctx)
     {
 		int intVal = atoi(akt_tuple->value->cstring);
     	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Looking at cstring %s", akt_tuple->value->cstring);
-        app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "KEY %d=%d/%s/%d", (int16_t)akt_tuple->key, akt_tuple->value->int16 ,akt_tuple->value->cstring, intVal);
+        app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "KEY %d=%d/%li/%s/%d", (int16_t)akt_tuple->key, akt_tuple->value->int16, akt_tuple->value->int32, akt_tuple->value->cstring, intVal);
 
 		switch (akt_tuple->key)	{
 		case JS_READY:
@@ -554,10 +573,10 @@ void in_received_handler(DictionaryIterator *received, void *ctx)
 			persist_write_string(W_COND, akt_tuple->value->cstring);
 			break;
 		case SUN_RISE_TIME:
-			persist_write_string(SUN_RISE_TIME, akt_tuple->value->cstring);
+			persist_write_int(SUN_RISE_TIME, intVal);
 			break;
 		case SUN_SET_TIME:
-			persist_write_string(SUN_SET_TIME, akt_tuple->value->cstring);
+			persist_write_int(SUN_SET_TIME, intVal);
 			break;
 		}
 		
@@ -590,6 +609,7 @@ void window_load(Window *window)
 	digitL = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_DIGITAL_55));
  	WeatherF = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_WEATHER_32));
 	arial9 = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_ARIAL_BOLD_9));
+	arial20 = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_ARIAL_BOLD_10));
  
 	Layer *window_layer = window_get_root_layer(window);
 
@@ -650,12 +670,31 @@ void window_load(Window *window)
 	bitmap_layer_set_compositing_mode(radio_layer, GCompOpSet);
 	layer_add_child(window_layer, bitmap_layer_get_layer(radio_layer));
 
-
+	/*
 	sunrise_layer = bitmap_layer_create(GRect(108, 141, 15, 15));
 	bitmap_layer_set_background_color(sunrise_layer, GColorClear);
 	bitmap_layer_set_bitmap(sunrise_layer, sun);
 	bitmap_layer_set_compositing_mode(sunrise_layer, GCompOpSet);
 	layer_add_child(window_layer, bitmap_layer_get_layer(sunrise_layer));
+	*/
+
+	//Sun layer top
+	sun_top_layer = text_layer_create(GRect(103, 145, 60, 30));
+	text_layer_set_background_color(sun_top_layer, GColorClear);
+	text_layer_set_text_color(sun_top_layer, GColorBlack);
+	text_layer_set_text_alignment(sun_top_layer, GTextAlignmentLeft);
+	text_layer_set_overflow_mode(sun_top_layer, GTextOverflowModeFill);
+	text_layer_set_font(sun_top_layer, arial20);
+	layer_add_child(window_layer, text_layer_get_layer(sun_top_layer));
+
+	//Sun layer bottom
+	sun_bottom_layer = text_layer_create(GRect(103, 153, 60, 30));
+	text_layer_set_background_color(sun_bottom_layer, GColorClear);
+	text_layer_set_text_color(sun_bottom_layer, GColorBlack);
+	text_layer_set_text_alignment(sun_bottom_layer, GTextAlignmentLeft);
+	text_layer_set_overflow_mode(sun_bottom_layer, GTextOverflowModeFill);
+	text_layer_set_font(sun_bottom_layer, arial20);
+	layer_add_child(window_layer, text_layer_get_layer(sun_bottom_layer));
 	
 	
 	//Init inverter_layer
@@ -682,6 +721,7 @@ void window_unload(Window *window)
 	fonts_unload_custom_font(digitL);
 	fonts_unload_custom_font(WeatherF);
 	fonts_unload_custom_font(arial9);
+	fonts_unload_custom_font(arial20);
 	
 	//Destroy GBitmaps
 	gbitmap_destroy(batteryAkt);

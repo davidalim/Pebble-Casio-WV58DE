@@ -156,13 +156,13 @@ function updateSunsetTimes(weatherPayload) {
     req.onload = function(e) {
         if (req.readyState == 4 && req.status == 200) {
             var response = JSON.parse(req.responseText);
-            var sunrise = response.results.sunrise; // convert to date
-            var sunset = response.results.sunset; // convert to date
+            var sunrise = Math.round(Date.parse(response.results.sunrise) / 1000); // convert to date
+            var sunset = Math.round(Date.parse(response.results.sunset) / 1000); // convert to date
             var day_length = response.results.day_length; //
             console.log("Got sunset data for location: lat=" + posLat + ", lon: " + posLon + ", Sunrise Time:" + sunrise + ", Sunset Time:" + sunset + ", Day length:" + day_length);
             var sunsetPayload = {
-                "sun_rise_time": sunrise,
-                "sun_set_time": sunset
+                "sun_rise_time": sunrise.toString(), //convert to string to as we already handle those data format
+                "sun_set_time": sunset.toString()
             };
 
             for (key in sunsetPayload){

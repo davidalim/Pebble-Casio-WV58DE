@@ -35,9 +35,16 @@
         "resources": {
             "media": [
                 {
-                    "characterRegex": "[%0-9a-zA-ZäöüÄÖÜßÀÂÄÁÈÉÊËÎÏÍÔÓŒÙÛÜÚŸÑàâäáèéêëîïíôóœùûüúÿÇçñ¿¡ºª. ]",
+                    "characterRegex": "[%0-9a-zA-ZäöüÄÖÜßÀÂÄÁÈÉÊËÎÏÍÔÓŒÙÛÜÚŸÑàâäáèéêëîïíôóœùûüúÿÇçñ¿¡ºª.]",
                     "file": "fonts/arialbd.ttf",
                     "name": "FONT_ARIAL_BOLD_9",
+                    "targetPlatforms": null,
+                    "type": "font"
+                },
+                {
+                    "characterRegex": "[0-9:▲▼]",
+                    "file": "fonts/arialbd.ttf",
+                    "name": "FONT_ARIAL_BOLD_10",
                     "targetPlatforms": null,
                     "type": "font"
                 },
@@ -78,7 +85,7 @@
                     "type": "font"
                 },
                 {
-                    "characterRegex": "[0-9:]",
+                    "characterRegex": "[0-9:▲▼]",
                     "compatibility": "2.7",
                     "file": "fonts/DIGITAL_BOLD.TTF",
                     "name": "FONT_DIGITAL_55",
@@ -86,7 +93,7 @@
                     "type": "font"
                 },
                 {
-                    "characterRegex": "[-/0-9.]",
+                    "characterRegex": "[-/0-9]",
                     "compatibility": "2.7",
                     "file": "fonts/DIGITAL_BOLD.TTF",
                     "name": "FONT_DIGITAL_25",
@@ -94,11 +101,11 @@
                     "type": "font"
                 },
                 {
-                    "characterRegex": "[-/0-9.]",
+                    "characterRegex": "[-/0-9.:▲▼]",
                     "compatibility": "2.7",
                     "file": "fonts/DIGITAL_BOLD.TTF",
                     "name": "FONT_DIGITAL_15",
-                    "trackingAdjust": -1,
+                    "trackingAdjust": 0,
                     "type": "font"
                 },
                 {
