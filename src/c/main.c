@@ -1,7 +1,9 @@
 #include <pebble.h>
 #include <pebble-effect-layer/pebble-effect-layer.h>
 
-static const int W_UPDATE_SEC = 60 * 15; // Update weather every 15 minutes
+static const double M_PI = 3.14159265358979323846;
+static const time_t TWELVE_HRS_SECS = (12 * 60 * 60);
+static const int W_UPDATE_SEC = 60 * 15; // Update weather (includes sun) every 15 minutes
 
 enum ConfigKeys {
 	JS_READY=0,
@@ -69,7 +71,7 @@ static CfgDta_t CfgData = {
 Window *window, *sec_window;
 Layer *background_layer; 
 TextLayer *ddmm_layer, *yyyy_layer, *hhmm_layer, *ss_layer, *wd_layer, *sun_top_layer, *sun_bottom_layer;
-BitmapLayer *radio_layer, *battery_layer, *sunrise_layer;
+BitmapLayer *radio_layer, *battery_layer, *sunpos_layer;
 InverterLayer *inv_layer, *sec_inv_layer;
 
 static GBitmap *background, *radio, *batteryAll, *batteryAkt, *sun;
@@ -187,7 +189,7 @@ static void accel_tap_handler(AccelAxisType axis, int32_t direction) {
 	layer_set_hidden(text_layer_get_layer(sun_top_layer), false);
 	layer_set_hidden(text_layer_get_layer(sun_bottom_layer), false);
 	update_all();
-	timer_sunset = app_timer_register(15 * 1000, timerCallbackHideSunset, NULL);
+	timer_sunset = app_timer_register(15 * 1000, timerCallbackHideSunset, NULL); // revert after 15 secs
 }
 //-----------------------------------------------------------------------------------------------------------------------
 static void background_layer_update_callback(Layer *layer, GContext* ctx) 
@@ -195,21 +197,21 @@ static void background_layer_update_callback(Layer *layer, GContext* ctx)
 	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Background Layer Update");
 	graphics_context_set_text_color(ctx, GColorBlack);
 
-	//Background
+	// ------------------- Background
 	GSize bg_size = gbitmap_get_bounds(background).size;
 	graphics_draw_bitmap_in_rect(ctx, background, GRect(0, 0, bg_size.w, bg_size.h));
 
-	//DD
+	// ------------------- DD
 	GBitmap *bmpTmp = gbitmap_create_as_sub_bitmap(batteryAll, GRect(0, 115, 12, 5));
 	graphics_draw_bitmap_in_rect(ctx, bmpTmp, GRect(CfgData.datefmt != 3 ? 17 : 48, 5, 12, 5));
 	gbitmap_destroy(bmpTmp);
 	
-	//MM
+	// ------------------- MM
 	bmpTmp = gbitmap_create_as_sub_bitmap(batteryAll, GRect(0, 120, 12, 5));
 	graphics_draw_bitmap_in_rect(ctx, bmpTmp, GRect(CfgData.datefmt != 3 ? 48 : 17, 5, 12, 5));
 	gbitmap_destroy(bmpTmp);
 	
-	//DST
+	// ------------------- DST
 	if (CfgData.isdst)
 	{
 		bmpTmp = gbitmap_create_as_sub_bitmap(batteryAll, GRect(0, 110, 12, 5));
@@ -217,7 +219,7 @@ static void background_layer_update_callback(Layer *layer, GContext* ctx)
 		gbitmap_destroy(bmpTmp);
 	}
 	
-	//Weather
+	// ------------------- Weather
 	GRect rc = GRect(95, 30, 34, 34);
 	if (CfgData.weather)
 	{
@@ -244,21 +246,91 @@ static void background_layer_update_callback(Layer *layer, GContext* ctx)
 		}
 	}
 
+	//  ------------------- Display the sun's current position
 
-	//Sunrise & Sunset
-	//108, 141, 15, 15
-	//struct tm epoch_time;
-	//memcpy(&epoch_time, localtime(&CfgData.sun_set_time), sizeof (struct tm));
-	//strftime(hhmmBuffer, sizeof(hhmmBuffer), "%H:%M", epoch_time);
+	// Watch display paremeters
+	// To calibrate, you can manually set curr_time to solar_noon or solar_midnight to get high and low spots
+	int16_t radius = 32;
+	GPoint center = GPoint(127, 152);
 
-	//char sSun[] = "-999";
-	//snprintf(sSun, sizeof(sSun), "%d", (int16_t)(CfgData.sun_set_time)); 
+	// working in UTF epoch *seconds*
+	time_t solar_horizon = (time_t)CfgData.sun_rise_time; // This will show when the sun passes both the rise and set times
+	time_t solar_noon = (time_t)((CfgData.sun_set_time - CfgData.sun_rise_time) / 2 + CfgData.sun_rise_time); // The sun should be at the highest at this point
+	time_t solar_midnight = (time_t)(solar_noon - TWELVE_HRS_SECS); // solar_noon - 12 hours
+	time_t curr_time;
+	time_ms(&curr_time, NULL);
 
-			//strftime(hhmmBuffer, sizeof(hhmmBuffer), "%I:%M", tick_time);
-	//graphics_draw_text(ctx, sSun, digitXS, GRect(70, 150, 50, 32), GTextOverflowModeFill, GTextAlignmentRight, NULL);
+	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Sun curr_time: %ld horizon: %ld, noon: %ld, midnight: %ld", curr_time, solar_horizon, solar_noon, solar_midnight);
 
- 	//memset(&ctime, 0, sizeof(struct tm));
-  	//strptime("2019-06-21T12:10:43+00:00", "%FT%T", &ctime);
+	// For arithmatic ratios, work only with seconds since start of today
+	time_t today_start = time_start_of_today();
+	solar_horizon = solar_horizon - today_start;
+	solar_noon = solar_noon - today_start;
+	solar_midnight = solar_midnight - today_start;
+	curr_time = curr_time - today_start;
+
+
+	
+	// After solor noon, we want the time to go back down
+	if (curr_time > solar_noon) {
+		curr_time = solar_noon - (curr_time - solar_noon);
+	}
+
+	// Normalize time so it is between 0-12, instead of solar midnight to solar noon
+	curr_time = curr_time - solar_midnight; 
+	solar_horizon = solar_horizon - solar_midnight;
+
+	/* Use trigonometry to find the position of sun and horizon marker on the quarter-circle
+	 * Working between 9 and 12 positions
+	 * 12 position = 0 or TRIG_MAX_ANGLE. 9 postion = TRIG_MAX_ANGLE * 3/4
+	 * Order of arithmatic is important here, as to not zero-out values
+	 */
+	int32_t angle = curr_time * (TRIG_MAX_ANGLE * 1/4) / TWELVE_HRS_SECS + (TRIG_MAX_ANGLE * 3/4);
+	GPoint sunloc;
+	sunloc.x = center.x + (radius * sin_lookup(angle) / TRIG_MAX_RATIO);
+	sunloc.y = center.y + (radius * -cos_lookup(angle) / TRIG_MAX_RATIO);
+
+	// Need both start and end points to draw horizon line with correct orientation
+	// Adjusting the radius to get correct position and line length
+	angle = solar_horizon * (TRIG_MAX_ANGLE * 1/4) / TWELVE_HRS_SECS + (TRIG_MAX_ANGLE * 3/4);
+	GPoint horizonloc_start, horizonloc_end;
+	horizonloc_start.x = center.x + ((radius - 6) * sin_lookup(angle) / TRIG_MAX_RATIO);
+	horizonloc_start.y = center.y + ((radius - 6) * -cos_lookup(angle) / TRIG_MAX_RATIO);
+	horizonloc_end.x = center.x + ((radius - 15) * sin_lookup(angle) / TRIG_MAX_RATIO);
+	horizonloc_end.y = center.y + ((radius - 15) * -cos_lookup(angle) / TRIG_MAX_RATIO);
+	
+	int32_t angle_d = angle * 360 / 65536;
+	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Sun pos angle: %d angle_deg: %d, x: %d, y: %d", (int)angle, (int)angle_d, sunloc.x, sunloc.y);
+
+	// Display sun
+	// TODO: Is there a better way to do this without having to make a new layer everytime?
+	layer_remove_from_parent(bitmap_layer_get_layer(sunpos_layer));
+	GSize sun_size = gbitmap_get_bounds(sun).size;
+	sunpos_layer = bitmap_layer_create(GRect(sunloc.x, sunloc.y, sun_size.w, sun_size.h));
+	bitmap_layer_set_background_color(sunpos_layer, GColorClear);
+	bitmap_layer_set_bitmap(sunpos_layer, sun);
+	bitmap_layer_set_compositing_mode(sunpos_layer, GCompOpSet);
+	layer_add_child(layer, bitmap_layer_get_layer(sunpos_layer));
+
+	// ------------------- Markers for solar noon, midnight, and horizon (aka rise/set)
+	// TODO: Only need to draw solar noon and midnight markers once ever
+	// Solar midnight marker - filled circle
+	uint16_t marker_radius = 2;
+	GPoint marker_center = GPoint(center.x - radius + (sun_size.w / 2), center.y + (sun_size.h / 2));
+	graphics_fill_circle(ctx, marker_center, marker_radius);
+
+	// Solar noon marker - hollow circle
+	marker_center = GPoint(center.x + (sun_size.w / 2), center.y - radius + (sun_size.h / 2));
+	graphics_draw_circle(ctx, marker_center, marker_radius);
+
+	// Sun horizon (rise/set) marker - line
+	graphics_context_set_stroke_width(ctx, 2);
+	graphics_draw_line(ctx, horizonloc_start, horizonloc_end);
+
+
+	// ------------------- Display Sunrise & Sunset times
+	// TODO: get sunrise of next day
+  	// TODO: swap these depending on what comes next. i.e. if sun is up, the sunset time should be on top
   	time_t tmAkt;
   	struct tm *ctime;
 
@@ -270,14 +342,13 @@ static void background_layer_update_callback(Layer *layer, GContext* ctx)
   	ctime = localtime(&tmAkt);
   	strftime(hhmmSunRBuffer, sizeof(hhmmSunRBuffer), "▲%I:%M", ctime);
 
-  	// TODO swap these depending on what comes next. i.e. if sun is up, the sunset time should be on top
 	text_layer_set_text(sun_top_layer, hhmmSunSBuffer);
 	text_layer_set_text(sun_bottom_layer, hhmmSunRBuffer);
 
   	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Sunrise time local: %s, sunset time local: %s", hhmmSunRBuffer, hhmmSunSBuffer);
 
 	
-	//AM/PM
+	// ------------------- AM/PM
 	if(!clock_is_24h_style())
 	{
 		bmpTmp = gbitmap_create_as_sub_bitmap(batteryAll, GRect(CfgData.isAM ? 0 : 4, 125, 4, 5));
@@ -285,7 +356,7 @@ static void background_layer_update_callback(Layer *layer, GContext* ctx)
 		gbitmap_destroy(bmpTmp);
 	}
 	
-	//Battery as percent
+	// ------------------- Battery as percent
 	if(!CfgData.s_Charging && CfgData.battdgt && aktBatt <= CfgData.showbatt)
 	{
 		char sTemp[] = "100%";
@@ -359,6 +430,7 @@ void tick_handler(struct tm *tick_time, TimeUnits units_changed)
 	}
 }
 //-----------------------------------------------------------------------------------------------------------------------
+// TODO: Display loading text for sun rise/set information?
 static bool update_weather() 
 {
 	strcpy(CfgData.w_icon, "h");
@@ -402,18 +474,6 @@ static void timerCallbackWeather(void *data)
 	}
 }
 
-/*
-You want..
--Weather update every 15 minutes
--Sun position update every 15 or so minutes
--Sunset times for the day. But you don't nessecarily need to update this every 15 minutes
-
-=> We can handle caching and such in phone app. 
-
-
-*/
-// 85 x
-// 105 y
 //-----------------------------------------------------------------------------------------------------------------------
 // Stores new configuration data (including weather updates).
 // Then recreates the background layer, causing the background handler to get called
@@ -636,6 +696,7 @@ void window_load(Window *window)
 	//Init Background
 	background_layer = layer_create(GRect(0, 0, 144, 168));
 	layer_set_update_proc(background_layer, background_layer_update_callback);
+
 	layer_add_child(window_layer, background_layer);
 
 	//DAY+MONTH layer
@@ -689,14 +750,6 @@ void window_load(Window *window)
 	bitmap_layer_set_bitmap(radio_layer, radio);
 	bitmap_layer_set_compositing_mode(radio_layer, GCompOpSet);
 	layer_add_child(window_layer, bitmap_layer_get_layer(radio_layer));
-
-	/*
-	sunrise_layer = bitmap_layer_create(GRect(108, 141, 15, 15));
-	bitmap_layer_set_background_color(sunrise_layer, GColorClear);
-	bitmap_layer_set_bitmap(sunrise_layer, sun);
-	bitmap_layer_set_compositing_mode(sunrise_layer, GCompOpSet);
-	layer_add_child(window_layer, bitmap_layer_get_layer(sunrise_layer));
-	*/
 
 	//Sun layer top
 	sun_top_layer = text_layer_create(GRect(3, 131, 84, 18));
@@ -755,7 +808,7 @@ void window_unload(Window *window)
 	//Destroy BitmapLayers
 	bitmap_layer_destroy(battery_layer);
 	bitmap_layer_destroy(radio_layer);
-	bitmap_layer_destroy(sunrise_layer);
+	bitmap_layer_destroy(sunpos_layer);
 	layer_destroy(background_layer);
 	
 	//Destroy Inverter Layer

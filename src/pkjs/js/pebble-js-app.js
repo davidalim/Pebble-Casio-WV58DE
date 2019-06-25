@@ -98,7 +98,7 @@ Pebble.addEventListener('appmessage', function(e) {
 });
 
 //-----------------------------------------------------------------------------------------------------------------------
-// TODO: Get and store next few day's times to display when offline
+// TODO: Get and store next few day's weather to display when offline
 function updateWeather() {
 	console.log("Updating weather");
 	var URL = "http://api.openweathermap.org/data/2.5/weather?APPID=9a4eed6c813f6d55d0699c148f7b575a&";
@@ -136,7 +136,9 @@ function updateWeather() {
 
 }
 //-----------------------------------------------------------------------------------------------------------------------
+// TODO: Cache times and only update once a day
 // TODO: Get and store next few day's times to display when offline
+// TODO: Can't query using CityID. Need to force get pos if not available
 function updateSunsetTimes(weatherPayload) {
     console.log("Updating sunrise/sunset times");
     var URL = "https://api.sunrise-sunset.org/json?";
@@ -147,8 +149,10 @@ function updateSunsetTimes(weatherPayload) {
         URL += "lat=" + posLat + "&lng=" + posLon;
     else
         return; //Error, no position data
-    
-    URL += "&date=today&formatted=0";
+
+    var date = new Date();
+    var dateString = date.getFullYear() + "-" + (date.getMonth() + 1) + "-" + date.getDate();
+    URL += "&date=" + dateString + "&formatted=0";
     console.log("UpdateURL: " + URL);
 
     var req = new XMLHttpRequest();
