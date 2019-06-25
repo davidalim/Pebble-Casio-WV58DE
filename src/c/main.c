@@ -77,7 +77,7 @@ static GFont digitXS, digitS, digitM, digitL, WeatherF, arial9, arial20;
 
 char ddmmBuffer[] = "00-00", yyyyBuffer[] = "0000", hhmmBuffer[] = "00:00", ssBuffer[] = "00", wdBuffer[] = "XXXX", hhmmSunRBuffer[] = "▲00:00", hhmmSunSBuffer[] = "▼00:00";
 static uint8_t aktBatt, aktBattAnim;
-static AppTimer *timer_weather, *timer_sun, *timer_batt;
+static AppTimer *timer_weather, *timer_sun, *timer_batt, *timer_sunset;
 
 //-----------------------------------------------------------------------------------------------------------------------
 char *upcase(char *str) {
@@ -169,6 +169,25 @@ void bluetooth_connection_handler(bool connected)
 			.durations = (uint32_t []) {100, 100, 100, 100, 400, 400, 100, 100, 100},
 				.num_segments = 9
 		});
+}
+//-----------------------------------------------------------------------------------------------------------------------
+static void timerCallbackHideSunset(void *data) 
+{
+	layer_set_hidden(text_layer_get_layer(sun_top_layer), true);
+	layer_set_hidden(text_layer_get_layer(sun_bottom_layer), true);
+	layer_set_hidden(text_layer_get_layer(wd_layer), false);
+	update_all();
+}
+//-----------------------------------------------------------------------------------------------------------------------
+static void accel_tap_handler(AccelAxisType axis, int32_t direction) {
+  	// A tap event occured. Swtich weekday with sunrise times
+	app_log(APP_LOG_LEVEL_DEBUG, __FILE__, __LINE__, "Tap received. direction: %d", (int)direction);
+
+	layer_set_hidden(text_layer_get_layer(wd_layer), true);
+	layer_set_hidden(text_layer_get_layer(sun_top_layer), false);
+	layer_set_hidden(text_layer_get_layer(sun_bottom_layer), false);
+	update_all();
+	timer_sunset = app_timer_register(15 * 1000, timerCallbackHideSunset, NULL);
 }
 //-----------------------------------------------------------------------------------------------------------------------
 static void background_layer_update_callback(Layer *layer, GContext* ctx) 
@@ -393,7 +412,8 @@ You want..
 
 
 */
-
+// 85 x
+// 105 y
 //-----------------------------------------------------------------------------------------------------------------------
 // Stores new configuration data (including weather updates).
 // Then recreates the background layer, causing the background handler to get called
@@ -609,7 +629,7 @@ void window_load(Window *window)
 	digitL = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_DIGITAL_55));
  	WeatherF = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_WEATHER_32));
 	arial9 = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_ARIAL_BOLD_9));
-	arial20 = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_ARIAL_BOLD_10));
+	arial20 = fonts_load_custom_font(resource_get_handle(RESOURCE_ID_FONT_ARIAL_BOLD_16));
  
 	Layer *window_layer = window_get_root_layer(window);
 
@@ -679,22 +699,24 @@ void window_load(Window *window)
 	*/
 
 	//Sun layer top
-	sun_top_layer = text_layer_create(GRect(103, 145, 60, 30));
+	sun_top_layer = text_layer_create(GRect(3, 131, 84, 18));
 	text_layer_set_background_color(sun_top_layer, GColorClear);
 	text_layer_set_text_color(sun_top_layer, GColorBlack);
-	text_layer_set_text_alignment(sun_top_layer, GTextAlignmentLeft);
+	text_layer_set_text_alignment(sun_top_layer, GTextAlignmentCenter);
 	text_layer_set_overflow_mode(sun_top_layer, GTextOverflowModeFill);
 	text_layer_set_font(sun_top_layer, arial20);
 	layer_add_child(window_layer, text_layer_get_layer(sun_top_layer));
+	layer_set_hidden(text_layer_get_layer(sun_top_layer), true);
 
 	//Sun layer bottom
-	sun_bottom_layer = text_layer_create(GRect(103, 153, 60, 30));
+	sun_bottom_layer = text_layer_create(GRect(3, 146, 84, 18));
 	text_layer_set_background_color(sun_bottom_layer, GColorClear);
 	text_layer_set_text_color(sun_bottom_layer, GColorBlack);
-	text_layer_set_text_alignment(sun_bottom_layer, GTextAlignmentLeft);
+	text_layer_set_text_alignment(sun_bottom_layer, GTextAlignmentCenter);
 	text_layer_set_overflow_mode(sun_bottom_layer, GTextOverflowModeFill);
 	text_layer_set_font(sun_bottom_layer, arial20);
 	layer_add_child(window_layer, text_layer_get_layer(sun_bottom_layer));
+	layer_set_hidden(text_layer_get_layer(sun_bottom_layer), true);
 	
 	
 	//Init inverter_layer
@@ -741,13 +763,6 @@ void window_unload(Window *window)
 	inverter_layer_destroy(sec_inv_layer);
 }
 //-----------------------------------------------------------------------------------------------------------------------
-static void multi_select_click_handler(ClickRecognizerRef recognizer,
-                                                              void *context) {
-	layer_set_hidden(bitmap_layer_get_layer(sunrise_layer), true);
-	update_all();
-}
-
-//-----------------------------------------------------------------------------------------------------------------------
 void handle_init(void) 
 {
 	char* sLocale = setlocale(LC_TIME, ""), sLang[3];
@@ -777,6 +792,8 @@ void handle_init(void)
 	tick_timer_service_subscribe(SECOND_UNIT, (TickHandler)tick_handler);
 	battery_state_service_subscribe(&battery_state_service_handler);
 	bluetooth_connection_service_subscribe(&bluetooth_connection_handler);
+	// Subscribe to tap events
+	accel_tap_service_subscribe(accel_tap_handler);
 
 	//Subscribe messages
 	app_message_register_inbox_received(in_received_handler);
@@ -789,12 +806,15 @@ void handle_init(void)
 void handle_deinit(void) 
 {
 	app_timer_cancel(timer_weather);
+	app_timer_cancel(timer_sunset);
 	app_timer_cancel(timer_sun);
 	app_timer_cancel(timer_batt);
 	app_message_deregister_callbacks();
 	tick_timer_service_unsubscribe();
 	battery_state_service_unsubscribe();
 	bluetooth_connection_service_unsubscribe();
+	// Unsubscribe from tap events
+	accel_tap_service_unsubscribe();
 
 	window_destroy(sec_window);
 	window_destroy(window);

@@ -44,7 +44,7 @@
                 {
                     "characterRegex": "[0-9:▲▼]",
                     "file": "fonts/arialbd.ttf",
-                    "name": "FONT_ARIAL_BOLD_10",
+                    "name": "FONT_ARIAL_BOLD_16",
                     "targetPlatforms": null,
                     "type": "font"
                 },
